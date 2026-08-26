@@ -28,7 +28,7 @@ Client → API → SQLite Database (tasks.db)
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/MehmetnC1/be02-task-api.git
 cd be02-task-api
 
 # Install dependencies
