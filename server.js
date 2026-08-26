@@ -29,9 +29,32 @@ if (count.count === 0) {
 }
 
 // Stage 1: Read from database
-// GET /tasks - return all tasks
+// GET /tasks - return all tasks (with optional search, filter, sort)
 app.get('/tasks', (req, res) => {
-  const tasks = db.prepare('SELECT * FROM tasks').all();
+  let query = 'SELECT * FROM tasks WHERE 1=1';
+  const params = [];
+
+  // Search by title (SQL LIKE)
+  if (req.query.search) {
+    query += ' AND title LIKE ?';
+    params.push(`%${req.query.search}%`);
+  }
+
+  // Filter by done status
+  if (req.query.done !== undefined) {
+    const doneValue = req.query.done === 'true' ? 1 : 0;
+    query += ' AND done = ?';
+    params.push(doneValue);
+  }
+
+  // Sort
+  if (req.query.sort === 'title') {
+    query += ' ORDER BY title ASC';
+  } else {
+    query += ' ORDER BY id ASC';
+  }
+
+  const tasks = db.prepare(query).all(...params);
   res.json(tasks);
 });
 
