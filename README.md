@@ -1,45 +1,44 @@
-# BE-02: Task API with SQLite Database
+# BE-03: Task API with PostgreSQL in Docker
 
-A RESTful CRUD API for managing tasks, using SQLite for persistent data storage.
+A RESTful CRUD API for managing tasks, using PostgreSQL in Docker for persistent data storage.
 
 ## Overview
 
-This project demonstrates how to connect a CRUD API to a real database. Instead of storing tasks in memory (which disappear on restart), data is now persisted in a SQLite database file.
+This project demonstrates how to containerize a full stack application with Docker. The API runs against a real PostgreSQL database running in a Docker container, and the entire stack starts with a single command.
 
 **Architecture:**
 ```
-Client → API → SQLite Database (tasks.db)
+Client → API (Docker) → PostgreSQL (Docker)
 ```
 
-## Why SQLite?
+## Why Docker + PostgreSQL?
 
-- **No installation required** - SQLite is embedded in the application
-- **Single file storage** - All data stored in `tasks.db`
-- **Lightweight** - Perfect for development and small applications
-- **Persistent** - Data survives server restarts
+- **Consistent environment** - Runs the same on every machine
+- **No installation required** - PostgreSQL runs in a container
+- **Persistent data** - Volume ensures data survives container restarts
+- **Production-like** - Same stack used by real companies
 
-## Setup
+## Quick Start
 
 ### Prerequisites
-- Node.js (v14 or higher)
-- npm
+- Docker and Docker Compose installed
 
-### Installation
+### One Command to Run Everything
 
 ```bash
 # Clone the repository
 git clone https://github.com/MehmetnC1/be02-task-api.git
 cd be02-task-api
 
-# Install dependencies
-npm install
+# Copy environment file
+cp .env.example .env
 
-# Start the server
-npm start
+# Start the stack
+docker compose up
 ```
 
-The server will start on `http://localhost:3000`. On first run, it automatically:
-1. Creates the `tasks.db` database file
+The API will be available at `http://localhost:3000`. On first run, it automatically:
+1. Creates the PostgreSQL database
 2. Creates the `tasks` table
 3. Inserts 3 example tasks
 
@@ -57,31 +56,31 @@ The server will start on `http://localhost:3000`. On first run, it automatically
 
 **Get all tasks:**
 ```bash
-curl http://localhost:3000/tasks
+curl -i http://localhost:3000/tasks
 ```
 
 **Get a specific task:**
 ```bash
-curl http://localhost:3000/tasks/1
+curl -i http://localhost:3000/tasks/1
 ```
 
 **Create a new task:**
 ```bash
-curl -X POST http://localhost:3000/tasks \
+curl -i -X POST http://localhost:3000/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title": "Learn SQL", "done": false}'
+  -d '{"title": "Learn Docker", "done": false}'
 ```
 
 **Update a task:**
 ```bash
-curl -X PUT http://localhost:3000/tasks/1 \
+curl -i -X PUT http://localhost:3000/tasks/1 \
   -H "Content-Type: application/json" \
   -d '{"title": "Buy groceries", "done": true}'
 ```
 
 **Delete a task:**
 ```bash
-curl -X DELETE http://localhost:3000/tasks/1
+curl -i -X DELETE http://localhost:3000/tasks/1
 ```
 
 ## Database Structure
@@ -90,49 +89,73 @@ curl -X DELETE http://localhost:3000/tasks/1
 
 | Column | Type | Description |
 |--------|------|-------------|
-| id | INTEGER | Primary key (auto-increment) |
+| id | SERIAL | Primary key (auto-increment) |
 | title | TEXT | Task description |
-| done | BOOLEAN | Completion status (0 or 1) |
+| done | BOOLEAN | Completion status |
 
-## Testing with SQLite Viewer
+## Environment Variables
 
-You can use [DB Browser for SQLite](https://sqlitebrowser.org/) to view and modify the database directly.
+Create a `.env` file from `.env.example`:
 
-### Useful SQL Queries
-
-```sql
--- List every task
-SELECT * FROM tasks;
-
--- Show only completed tasks
-SELECT * FROM tasks WHERE done = 1;
-
--- Count all tasks
-SELECT COUNT(*) FROM tasks;
-
--- Mark every task as completed
-UPDATE tasks SET done = 1;
-
--- Delete all completed tasks
-DELETE FROM tasks WHERE done = 1;
+```bash
+cp .env.example .env
 ```
 
-## Optional Features Implemented
+| Variable | Description | Default |
+|----------|-------------|---------|
+| DATABASE_URL | PostgreSQL connection string | postgres://postgres:dev@localhost:5432/tasks |
 
-- **Search**: `GET /tasks?search=milk` - Uses SQL LIKE operator
-- **Filter**: `GET /tasks?done=true` - Filter by completion status
-- **Sort**: `GET /tasks?sort=title` - Sort alphabetically by title
+## Persistence Test
+
+Data persists across container restarts:
+
+```bash
+# Create some tasks
+curl -X POST http://localhost:3000/tasks -H "Content-Type: application/json" -d '{"title": "Test task"}'
+
+# Restart the stack
+docker compose down
+docker compose up -d
+
+# Data is still there
+curl http://localhost:3000/tasks
+```
 
 ## File Structure
 
 ```
 be02-task-api/
-├── server.js          # Main application file
-├── package.json       # Dependencies and scripts
-├── tasks.db           # SQLite database (auto-created)
-└── README.md          # This file
+├── server.js            # Main application file
+├── package.json         # Dependencies and scripts
+├── Dockerfile           # App container build
+├── docker-compose.yml   # Stack orchestration
+├── .env.example         # Environment template
+├── .env                 # Environment secrets (git-ignored)
+└── README.md            # This file
+```
+
+## Useful Docker Commands
+
+```bash
+# Start the stack
+docker compose up -d
+
+# Stop the stack
+docker compose down
+
+# View logs
+docker compose logs -f
+
+# Access PostgreSQL directly
+docker exec -it be02-task-api-db-1 psql -U postgres -d tasks
+
+# List tables
+docker exec -it be02-task-api-db-1 psql -U postgres -d tasks -c "\dt"
+
+# Query tasks
+docker exec -it be02-task-api-db-1 psql -U postgres -d tasks -c "SELECT * FROM tasks;"
 ```
 
 ## Author
 
-Backend AI Engineering - Week 3 Assignment (BE-02)
+Backend AI Engineering - Week 3 Assignment (BE-03)

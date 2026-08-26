@@ -1,141 +1,136 @@
+require('dotenv').config();
 const express = require('express');
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
 
-// Stage 0: Create SQLite database and table
-const db = new Database(path.join(__dirname, 'tasks.db'));
+// Postgres connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done BOOLEAN DEFAULT 0
-  )
-`);
+// Create table and seed data on startup
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      done BOOLEAN DEFAULT false
+    )
+  `);
 
-// Insert example tasks only if table is empty
-const count = db.prepare('SELECT COUNT(*) as count FROM tasks').get();
-if (count.count === 0) {
-  const insert = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
-  insert.run('Buy groceries', 0);
-  insert.run('Clean the house', 0);
-  insert.run('Write documentation', 1);
-  console.log('3 example tasks inserted.');
+  const { rows } = await pool.query('SELECT COUNT(*) as count FROM tasks');
+  if (parseInt(rows[0].count) === 0) {
+    await pool.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Buy groceries', false]);
+    await pool.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Clean the house', false]);
+    await pool.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Write documentation', true]);
+    console.log('3 example tasks inserted.');
+  }
 }
 
-// Stage 1: Read from database
 // GET /tasks - return all tasks (with optional search, filter, sort)
-app.get('/tasks', (req, res) => {
+app.get('/tasks', async (req, res) => {
   let query = 'SELECT * FROM tasks WHERE 1=1';
   const params = [];
 
-  // Search by title (SQL LIKE)
   if (req.query.search) {
-    query += ' AND title LIKE ?';
     params.push(`%${req.query.search}%`);
+    query += ` AND title LIKE $${params.length}`;
   }
 
-  // Filter by done status
   if (req.query.done !== undefined) {
-    const doneValue = req.query.done === 'true' ? 1 : 0;
-    query += ' AND done = ?';
-    params.push(doneValue);
+    params.push(req.query.done === 'true');
+    query += ` AND done = $${params.length}`;
   }
 
-  // Sort
   if (req.query.sort === 'title') {
     query += ' ORDER BY title ASC';
   } else {
     query += ' ORDER BY id ASC';
   }
 
-  const tasks = db.prepare(query).all(...params);
-  res.json(tasks);
+  const { rows } = await pool.query(query, params);
+  res.json(rows);
 });
 
 // GET /tasks/:id - return one task
-app.get('/tasks/:id', (req, res) => {
+app.get('/tasks/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  
-  if (!task) {
+  const { rows } = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+
+  if (rows.length === 0) {
     return res.status(404).json({ error: 'Task not found' });
   }
-  
-  res.json(task);
+
+  res.json(rows[0]);
 });
 
-// Stage 2: Create new tasks
 // POST /tasks - insert new task
-app.post('/tasks', (req, res) => {
+app.post('/tasks', async (req, res) => {
   const { title, done } = req.body;
-  
+
   if (!title || title.trim() === '') {
     return res.status(400).json({ error: 'Title is required' });
   }
-  
-  const result = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)').run(
-    title.trim(),
-    done ? 1 : 0
+
+  const { rows } = await pool.query(
+    'INSERT INTO tasks (title, done) VALUES ($1, $2) RETURNING *',
+    [title.trim(), done || false]
   );
-  
-  const newTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(newTask);
+
+  res.status(201).json(rows[0]);
 });
 
-// Stage 3: Update and delete
 // PUT /tasks/:id - update task
-app.put('/tasks/:id', (req, res) => {
+app.put('/tasks/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const { title, done } = req.body;
-  
-  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  if (!existing) {
+
+  const { rows: existing } = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+  if (existing.length === 0) {
     return res.status(404).json({ error: 'Task not found' });
   }
-  
-  if (title !== undefined && (title.trim() === '')) {
+
+  if (title !== undefined && title.trim() === '') {
     return res.status(400).json({ error: 'Title cannot be empty' });
   }
-  
-  const updatedTitle = title !== undefined ? title.trim() : existing.title;
-  const updatedDone = done !== undefined ? (done ? 1 : 0) : existing.done;
-  
-  db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?').run(
-    updatedTitle,
-    updatedDone,
-    id
+
+  const updatedTitle = title !== undefined ? title.trim() : existing[0].title;
+  const updatedDone = done !== undefined ? done : existing[0].done;
+
+  const { rows } = await pool.query(
+    'UPDATE tasks SET title = $1, done = $2 WHERE id = $3 RETURNING *',
+    [updatedTitle, updatedDone, id]
   );
-  
-  const updatedTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  res.json(updatedTask);
+
+  res.json(rows[0]);
 });
 
 // DELETE /tasks/:id - delete task
-app.delete('/tasks/:id', (req, res) => {
+app.delete('/tasks/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  
-  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  if (!existing) {
+
+  const { rows: existing } = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+  if (existing.length === 0) {
     return res.status(404).json({ error: 'Task not found' });
   }
-  
-  db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+
+  await pool.query('DELETE FROM tasks WHERE id = $1', [id]);
   res.status(204).send();
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-  db.close();
+process.on('SIGINT', async () => {
+  await pool.end();
   process.exit(0);
 });
